@@ -5,7 +5,7 @@ import torch
 import argparse
 import torch.nn as nn
 from PIL import Image
-from torchvision import transforms
+from torchvision import transforms, models
 from torch.utils.data import DataLoader, Dataset
 
 
@@ -77,10 +77,12 @@ class MyConv(nn.Module):
     def __init__(self, num_classes=100):
 
         super().__init__()
+        self.backbone = models.resnet18(pretrained=False)
+        self.backbone.fc = nn.Linear(self.backbone.fc.in_features, num_classes)
 
 
     def forward(self, x, return_intermediate=False):
-        return torch.tensor(0)
+        return self.backbone(x)
 
     
 def evaluate(model, test_loader, criterion, device):
@@ -126,8 +128,8 @@ def evaluate(model, test_loader, criterion, device):
     
     return avg_loss, accuracy
 
-def train(model, train_loader, val_loader, optimizer, criterion, device,
-          num_epochs):
+def train(model, train_loader, val_loader, optimizer, criterion, device, scheduler, num_epochs):
+    
     """
     Train the CNN classifer on the training set and evaluate it on the validation set every epoch.
 
@@ -151,18 +153,21 @@ def train(model, train_loader, val_loader, optimizer, criterion, device,
                   position=0,
                   leave=True) as pbar:
             for inputs, labels in train_loader:
-                #Move inputs and labels to device
+                
                 inputs = inputs.to(device)
                 labels = labels.to(device)
-
-                # Compute the logits and loss
+                
+                optimizer.zero_grad()
                 logits = model(inputs)
-                loss = torch.tensor(0)
-
-                # Update the progress bar
+                loss = criterion(logits, labels)
+                
+                loss.backward()
+                optimizer.step()
+                
                 pbar.update(1)
                 pbar.set_postfix(loss=loss.item())
 
+            if scheduler: scheduler.step()
             avg_loss, accuracy = evaluate(model, val_loader, criterion, device)
             print(
                 f'Validation set: Average loss = {avg_loss:.4f}, Accuracy = {accuracy:.4f}'
@@ -210,11 +215,19 @@ def main(args):
     image_net_mean = torch.Tensor([0.485, 0.456, 0.406])
     image_net_std = torch.Tensor([0.229, 0.224, 0.225])
     
-    ## Define data transformation
     data_transform = transforms.Compose([
+        transforms.Resize(256),
+        transforms.RandomResizedCrop(224, scale=(0.6, 1.0)),
+        transforms.RandomHorizontalFlip(),
+        transforms.ColorJitter(0.2, 0.2, 0.2, 0.1),
         transforms.ToTensor(),
-        transforms.Resize((128,128)),
-        transforms.Normalize(image_net_mean, image_net_std),
+        transforms.Normalize(image_net_mean, image_net_std)
+    ])
+    eval_transform = transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        transforms.Normalize(image_net_mean, image_net_std)
     ])
 
     data_root = 'data'
@@ -248,15 +261,16 @@ def main(args):
 
     model = MyConv(num_classes=len(miniplaces_train.label_dict))
                    
+    # check between Adam and AdamW in the end
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=5)
 
-    optimizer = None 
-
-    criterion = None
+    criterion = nn.CrossEntropyLoss()
 
     if not args.test:
 
         train(model, train_loader, val_loader, optimizer, criterion,
-              device, num_epochs=5)
+              device, scheduler, num_epochs=5)
 
         torch.save({'model_state_dict': model.state_dict(),
                     'optimizer_state_dict':optimizer.state_dict()}, 'model.ckpt')

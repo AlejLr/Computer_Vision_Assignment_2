@@ -170,7 +170,7 @@ def train(model, train_loader, val_loader, optimizer, criterion, device, schedul
             if scheduler: scheduler.step()
             avg_loss, accuracy = evaluate(model, val_loader, criterion, device)
             print(
-                f'Validation set: Average loss = {avg_loss:.4f}, Accuracy = {accuracy:.4f}'
+                f'\nValidation set: Average loss = {avg_loss:.4f}, Accuracy = {accuracy:.4f}'
                 )
 
 def test(model, test_loader, device):

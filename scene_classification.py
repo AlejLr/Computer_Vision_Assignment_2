@@ -128,8 +128,6 @@ def evaluate(model, test_loader, criterion, device):
     
     return avg_loss, accuracy
 
-best_acc = 0.0
-
 def train(model, train_loader, val_loader, optimizer, criterion, device, num_epochs, scheduler, scaler):
     
     """
@@ -176,10 +174,6 @@ def train(model, train_loader, val_loader, optimizer, criterion, device, num_epo
             print(
                 f'\nValidation set: Average loss = {avg_loss:.4f}, Accuracy = {accuracy:.4f}'
                 )
-            
-            if accuracy > best_acc:
-                best_acc = accuracy
-                torch.save({'model_state_dict': model.state_dict()}, 'best_model.ckpt')
 
 def test(model, test_loader, device):
     """
@@ -287,18 +281,14 @@ def main(args):
                                 lr=0.1 * (64/256),  # scale if you change batch size
                                 momentum=0.9, weight_decay=5e-4, nesterov=True)
 
-    warmup = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.01, total_iters=3)
-    cosine = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs-3)
-    def step_sched(epoch):
-        if epoch < 3: warmup.step()
-        else:         cosine.step()
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
         
     scaler = torch.amp.GradScaler("cuda")
 
     if not args.test:
 
         train(model, train_loader, val_loader, optimizer, criterion,
-              device, num_epochs, scheduler=step_sched, scaler=scaler)
+              device, num_epochs, scheduler=scheduler, scaler=scaler)
 
         torch.save({'model_state_dict': model.state_dict(),
                     'optimizer_state_dict':optimizer.state_dict()}, 'model.ckpt')

@@ -77,7 +77,7 @@ class MyConv(nn.Module):
     def __init__(self, num_classes=100):
 
         super().__init__()
-        self.backbone = models.resnet18(pretrained=False)
+        self.backbone = models.resnet18(weights=None)
         self.backbone.fc = nn.Linear(self.backbone.fc.in_features, num_classes)
 
 
@@ -145,6 +145,7 @@ def train(model, train_loader, val_loader, optimizer, criterion, device, num_epo
 
     # Place the model on device
     model = model.to(device)
+    best_acc = 0.0
     for epoch in range(num_epochs):
         model.train() # Set model to training mode
 
@@ -174,6 +175,18 @@ def train(model, train_loader, val_loader, optimizer, criterion, device, num_epo
             print(
                 f'\nValidation set: Average loss = {avg_loss:.4f}, Accuracy = {accuracy:.4f}'
                 )
+            torch.save({'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict()},
+                   'model_last.ckpt')
+            
+            if accuracy > best_acc:
+                best_acc = accuracy
+                torch.save({'epoch': epoch,
+                            'model_state_dict': model.state_dict(),
+                            'optimizer_state_dict': optimizer.state_dict()},
+                           'model_best.ckpt')
+
 
 def test(model, test_loader, device):
     """
@@ -296,7 +309,7 @@ def main(args):
     else:
         miniplaces_test = MiniPlaces(data_root,
                                      split='test',
-                                     transform=data_transform)
+                                     transform=eval_transform)
         test_loader = DataLoader(miniplaces_test,
                                 batch_size=batch_size,
                                 num_workers=num_workers,

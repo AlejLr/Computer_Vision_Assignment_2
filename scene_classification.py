@@ -128,7 +128,9 @@ def evaluate(model, test_loader, criterion, device):
     
     return avg_loss, accuracy
 
-def train(model, train_loader, val_loader, optimizer, criterion, device, scheduler, num_epochs):
+best_acc = 0.0
+
+def train(model, train_loader, val_loader, optimizer, criterion, device, num_epochs, scheduler, scaler):
     
     """
     Train the CNN classifer on the training set and evaluate it on the validation set every epoch.
@@ -157,12 +159,14 @@ def train(model, train_loader, val_loader, optimizer, criterion, device, schedul
                 inputs = inputs.to(device)
                 labels = labels.to(device)
                 
-                optimizer.zero_grad()
-                logits = model(inputs)
-                loss = criterion(logits, labels)
+                optimizer.zero_grad(set_to_none=True)
+                with torch.amp.autocast("cuda"):
+                    logits = model(inputs)
+                    loss = criterion(logits, labels)
                 
-                loss.backward()
-                optimizer.step()
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
                 
                 pbar.update(1)
                 pbar.set_postfix(loss=loss.item())
@@ -172,6 +176,10 @@ def train(model, train_loader, val_loader, optimizer, criterion, device, schedul
             print(
                 f'\nValidation set: Average loss = {avg_loss:.4f}, Accuracy = {accuracy:.4f}'
                 )
+            
+            if accuracy > best_acc:
+                best_acc = accuracy
+                torch.save({'model_state_dict': model.state_dict()}, 'best_model.ckpt')
 
 def test(model, test_loader, device):
     """
@@ -217,11 +225,12 @@ def main(args):
     
     data_transform = transforms.Compose([
         transforms.Resize(256),
-        transforms.RandomResizedCrop(224, scale=(0.6, 1.0)),
+        transforms.RandomResizedCrop(224, scale=(0.5, 1.0)),
         transforms.RandomHorizontalFlip(),
         transforms.ColorJitter(0.2, 0.2, 0.2, 0.1),
         transforms.ToTensor(),
-        transforms.Normalize(image_net_mean, image_net_std)
+        transforms.Normalize(image_net_mean, image_net_std),
+        transforms.RandomErasing(p=0.1)
     ])
     eval_transform = transforms.Compose([
         transforms.Resize(256),
@@ -238,7 +247,7 @@ def main(args):
                                   transform=data_transform)
     miniplaces_val = MiniPlaces(data_root,
                                 split='val',
-                                transform=data_transform,
+                                transform=eval_transform,
                                 label_dict=miniplaces_train.label_dict)
 
     # Create the dataloaders
@@ -260,17 +269,36 @@ def main(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     model = MyConv(num_classes=len(miniplaces_train.label_dict))
+    
+    num_epochs = 30
                    
     # check between Adam and AdamW in the end
+    '''
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=5)
 
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
+    '''
+    # Using SGD with momentum and step LR scheduler
+    
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
+
+    optimizer = torch.optim.SGD(model.parameters(),
+                                lr=0.1 * (64/256),  # scale if you change batch size
+                                momentum=0.9, weight_decay=5e-4, nesterov=True)
+
+    warmup = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.01, total_iters=3)
+    cosine = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs-3)
+    def step_sched(epoch):
+        if epoch < 3: warmup.step()
+        else:         cosine.step()
+        
+    scaler = torch.amp.GradScaler("cuda")
 
     if not args.test:
 
         train(model, train_loader, val_loader, optimizer, criterion,
-              device, scheduler, num_epochs=5)
+              device, num_epochs, scheduler=step_sched, scaler=scaler)
 
         torch.save({'model_state_dict': model.state_dict(),
                     'optimizer_state_dict':optimizer.state_dict()}, 'model.ckpt')

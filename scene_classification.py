@@ -279,20 +279,18 @@ def main(args):
     
     num_epochs = 30
                    
-    # check between Adam and AdamW in the end
+    # check which one works better between Adam and AdamW
     '''
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=5)
 
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
     '''
-    # Using SGD with momentum and step LR scheduler
+    # Using SGD with momentum and cosine LR scheduler
     
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
 
-    optimizer = torch.optim.SGD(model.parameters(),
-                                lr=0.1 * (64/256),  # scale if you change batch size
-                                momentum=0.9, weight_decay=5e-4, nesterov=True)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1 * (64/256), momentum=0.9, weight_decay=5e-4, nesterov=True)
 
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
         

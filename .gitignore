@@ -16,6 +16,7 @@ data/**/*.jpg
 
 # Saved model
 *.ckpt
+*.tar.gz
 
 # Distribution / packaging
 .Python
